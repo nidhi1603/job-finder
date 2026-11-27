@@ -122,6 +122,14 @@ def min_years_required(required_text: str) -> int | None:
 # ------------------------------------------------------------------ rules that need the description
 
 
+def phd_only(title: str, required_text: str) -> bool:
+    """A PhD is required (in the title or a non-'preferred' requirement) with no other degree route."""
+    needs_phd = bool(R.PHD.search(title)) or any(
+        R.PHD.search(s) and not R.NOT_REQUIRED_WORDS.search(s)
+        for s in re.split(r"(?<=[.;\n])\s+", required_text))
+    return needs_phd and not R.NON_PHD_ROUTE.search(title + "\n" + required_text)
+
+
 def detail_rules(job: Job) -> str | None:
     text = job.text or ""
     if job_location_class(job) == "unknown" and not mentions_us(job.location + "\n" + text):
@@ -135,6 +143,8 @@ def detail_rules(job: Job) -> str | None:
     if is_intern(job) and not R.RECENT_GRAD.search(text):
         return "intern-no-recent-grads"
     required, _ = split_sections(text)
+    if phd_only(job.title, required):
+        return "phd-only"
     job.min_yoe = min_years_required(job.title + "\n" + required)   # titles like 'Data Scientist (3-5 years experience)'
     if job.min_yoe is not None and job.min_yoe > R.MAX_MIN_YOE:
         return "yoe"

@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from jobfinder.filters import detail_rules, location_class, min_years_required, prefilter, split_sections, title_family
+from jobfinder.filters import phd_only, detail_rules, location_class, min_years_required, prefilter, split_sections, title_family
 from jobfinder.models import Job
 from jobfinder.text import now_utc, parse_workday_posted
 from jobfinder.urls import parse_ats_url
@@ -81,3 +81,13 @@ def test_parse_ats_url():
     assert parse_ats_url("https://apply.workable.com/scitec/j/66E4D7E6C6/apply") == ("workable", "scitec", "66E4D7E6C6")
     wd = parse_ats_url("https://toyota.wd503.myworkdayjobs.com/en-US/tmna/job/Plano-Texas/Software-Engineer_10325070")
     assert wd == ("workday", "toyota.wd503.myworkdayjobs.com|toyota|tmna", "/job/Plano-Texas/Software-Engineer_10325070")
+
+
+def test_phd_only():
+    assert phd_only("Research Scientist", "Requirements:\n- PhD in Computer Science or related field")
+    assert phd_only("Research Scientist, PhD New Grad", "Strong publication record in ML.")
+    assert not phd_only("Research Scientist", "MS or PhD in Computer Science")
+    assert not phd_only("Applied Scientist", "PhD preferred. Strong Python.")
+    assert not phd_only("ML Engineer", "PhD in ML, or equivalent practical experience")
+    assert not phd_only("Data Scientist", "Bachelor's degree in a quantitative field")
+    assert detail_rules(job("Research Scientist", text="Qualifications:\n- PhD in Machine Learning")) == "phd-only"

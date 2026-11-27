@@ -91,7 +91,7 @@ NO_SPONSOR = re.compile(
     r"without (?:the need for |requiring )?(?:current or future |future )?(?:visa |employment |immigration )?sponsorship|"
     r"sponsorship (?:is |will )?not (?:be )?(?:available|provided|offered)", I)
 SPONSORS = re.compile(r"(?:visa|h-?1b|immigration) sponsorship (?:is )?(?:available|provided|offered)|we (?:will |do )?sponsor", I)
-DEGREE = [("PhD", re.compile(r"\bph\.?d\b|doctora", I)),
+DEGREE = [("PhD", re.compile(r"\bph\.?\s?d\.?\b|\bdoctora(?:te|l) degree\b", I)),
           ("MS", re.compile(r"\bmaster'?s?\b|\bm\.?s\.?\b(?= in|\b)", I)),
           ("BS", re.compile(r"\bbachelor'?s?\b|\bb\.?s\.?\b(?= in|\b)|\bundergraduate degree\b", I))]
 
@@ -100,3 +100,10 @@ PREFERRED_HDR = re.compile(r"\b(preferred|nice[- ]to[- ]have|bonus|pluses|a plus
 REQUIRED_HDR = re.compile(
     r"\b(requirements?|qualifications?|what you(?:'ll)? (?:need|bring)|must[- ]haves?|you have|you bring|who you are|"
     r"about you|what we(?:'re| are) looking for|skills|experience|you should have|basic|minimum)\b", I)
+
+# Drop: PhD-only roles (a PhD is required and no master's/bachelor's/equivalent-experience route is offered).
+PHD = re.compile(r"\bph\.?\s?d\.?\b|\bdoctora(?:te|l) degree\b", I)
+NON_PHD_ROUTE = re.compile(
+    r"\bmaster'?s?\b|\bm\.?s\.?(?=[\s,/)])|\bbachelor'?s?\b|\bb\.?s\.?(?=[\s,/)])|\bundergraduate\b|"
+    r"equivalent (?:practical |industry |work |professional )?experience", I)
+NOT_REQUIRED_WORDS = re.compile(r"prefer|a plus|is a plus|bonus|nice[- ]to[- ]have|desired|ideal", I)

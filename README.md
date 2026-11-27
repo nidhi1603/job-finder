@@ -22,6 +22,7 @@ to catch jobs within hours of posting, before they reach LinkedIn and fill up wi
    - No security clearance
    - No US-citizens-only or green-card-only requirement
    - Internships only if they accept recent graduates
+   - Not PhD-only (a PhD required with no master's, bachelor's or equivalent-experience route)
 
    Two kinds of note are added:
    - **Flags**: no sponsorship, degree level.
