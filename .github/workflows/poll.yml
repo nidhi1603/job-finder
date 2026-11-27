@@ -20,7 +20,7 @@ concurrency:
 jobs:
   poll:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 150     # the first catch-up reads 15 days of every board; hourly runs take minutes
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -134,7 +134,13 @@ async def run(args) -> None:
 
     passed.sort(key=lambda j: (-j.fit_rank - (10 if j.boosts else 0),
                                -(j.posted_at.timestamp() if j.posted_at else 0)))
-    shown, extra = passed[:MAX_EMAIL_JOBS], max(0, len(passed) - MAX_EMAIL_JOBS)
+    unique, seen_listing = [], set()
+    for j in passed:              # same company + title + location posted under several req IDs
+        listing = (j.company.lower(), j.title.lower().strip(), j.location.lower().strip())
+        if listing not in seen_listing:
+            seen_listing.add(listing)
+            unique.append(j)
+    shown, extra = unique[:MAX_EMAIL_JOBS], max(0, len(unique) - MAX_EMAIL_JOBS)
     stats["passed"] = len(passed)
 
     email_ready = all(os.environ.get(k) for k in ("EMAIL_FROM", "EMAIL_TO", "GMAIL_APP_PASSWORD")) and not args.dry_run

@@ -250,7 +250,7 @@ DETAILERS = {"greenhouse": greenhouse_detail, "workday": workday_detail}
 
 # Workday serves every company from shared infrastructure and answers bursts with HTTP 429,
 # so it gets its own small lane: a few companies at a time, a pause after every request.
-WORKDAY_CONCURRENCY = 3
+WORKDAY_CONCURRENCY = 4
 WORKDAY_DELAY = 0.4
 
 
