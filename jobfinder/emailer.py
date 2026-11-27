@@ -1,4 +1,7 @@
-"""Render the digest and send it through Gmail SMTP (or write it to out/ when email isn't set up)."""
+"""Render emails and send them through Gmail SMTP (or write them to out/ when email isn't set up).
+
+Three kinds: the full digest (no tracker sheet), the strong-match alert, and the morning summary.
+"""
 from __future__ import annotations
 
 import html
@@ -15,7 +18,7 @@ from .models import Job
 from .scoring import BANDS, crowd_label, fit_band
 
 ROOT = Path(__file__).resolve().parent.parent
-BAND_RULES = ["70%+ fit, 4+ skills", "50%+ fit", "below 50% or no skills listed"]
+BAND_RULES = ["70%+ fit, 4+ skills", "50%+ fit, 3+ skills", "below 50%, or too few skills listed to tell"]
 
 
 def _ago(job: Job, now: datetime) -> str:
@@ -28,10 +31,29 @@ def _ago(job: Job, now: datetime) -> str:
     return f"posted {approx}{int(hours // 24)}d ago"
 
 
-def render(jobs: list[Job], now: datetime, extra: int, catch_up: bool) -> tuple[str, str, str]:
+def _plural(n: int, word: str, many: str = "") -> str:
+    return f"{n} {word if n == 1 else (many or word + 's')}"
+
+
+def _button(url: str, label: str) -> str:
+    return (f'<p style="margin:16px 0"><a href="{html.escape(url)}" style="background:#1a56db;color:#fff;padding:9px 16px;'
+            f'border-radius:6px;text-decoration:none;font-weight:600">{html.escape(label)}</a></p>') if url else ""
+
+
+def render(jobs: list[Job], now: datetime, extra: int, catch_up: bool, kind: str = "digest",
+           sheet_url: str = "", others: int = 0) -> tuple[str, str, str]:
+    """kind="digest": every match (no tracker sheet). kind="alert": only strong matches; the rest went to the sheet."""
     top = jobs[0]
-    kind = "catch-up: " if catch_up else ""
-    subject = f"Job Finder {kind}{len(jobs) + extra} new match{'es' if len(jobs) + extra != 1 else ''} · top: {top.title} @ {top.company}"
+    if kind == "alert":
+        subject = f"{_plural(len(jobs), 'strong match', 'strong matches')} · top: {top.title} @ {top.company}"
+        intro = (f"New postings that fit you well. Apply within 24 hours for the best odds, then mark them Applied in "
+                 f"your tracker." + (f" {_plural(others, 'other new job')} went to the tracker without an email." if others else ""))
+    else:
+        label = "catch-up: " if catch_up else ""
+        subject = f"Job Finder {label}{len(jobs) + extra} new match{'es' if len(jobs) + extra != 1 else ''} · top: {top.title} @ {top.company}"
+        intro = (f"{len(jobs) + extra} new job{'s' if len(jobs) + extra != 1 else ''} that passed your rules. Recently funded "
+                 f"startups come first, then the rest grouped by fit (strong, good, other) with the most recently posted first "
+                 f"inside each group.")
     rows_html, rows_txt = [], []
     group_of = lambda j: "funded" if j.funding else fit_band(j)   # noqa: E731
     counts = Counter(group_of(j) for j in jobs)
@@ -73,12 +95,52 @@ def render(jobs: list[Job], now: datetime, extra: int, catch_up: bool) -> tuple[
                         f"{' | ' + '; '.join(j.flags) if j.flags else ''}\n  {j.url}")
     more = f"<p style='color:#777'>+{extra} more lower-ranked matches not shown.</p>" if extra else ""
     html_body = f"""<html><body style="font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:720px;margin:auto">
-<p style="color:#555">{len(jobs) + extra} new job{'s' if len(jobs) + extra != 1 else ''} that passed your rules. Recently funded startups come first,
-then the rest grouped by fit (strong, good, other) with the most recently posted first inside each group.
-Fit = share of the posting's skills found on your resume (required skills count double). Crowding is an estimate.</p>
-<table style="width:100%;border-collapse:collapse">{''.join(rows_html)}</table>{more}
+<p style="color:#555">{html.escape(intro)} Fit = share of the posting's skills found on your resume (required skills count
+double). Crowding is an estimate.</p>{_button(sheet_url, "Open your tracker")}
+<table style="width:100%;border-collapse:collapse">{''.join(rows_html)}</table>{more}{_button(sheet_url, "Open your tracker")}
 <p style="color:#aaa;font-size:11px">Sent by your job-finder · {now.strftime('%Y-%m-%d %H:%M UTC')}</p></body></html>"""
-    text_body = "\n".join(rows_txt) + (f"\n+{extra} more not shown" if extra else "")
+    text_body = intro + "\n" + "\n".join(rows_txt) + (f"\n+{extra} more not shown" if extra else "") + (
+        f"\n\nYour tracker: {sheet_url}" if sheet_url else "")
+    return subject, html_body, text_body
+
+
+GROUP_ORDER = {"Funded": 0, "Strong": 1, "Good": 2, "Other": 3}
+
+
+def render_summary(d: dict, now: datetime) -> tuple[str, str, str]:
+    """Morning email from the tracker sheet: what arrived since the last summary, what's still untouched, and
+    how many applications you've sent."""
+    rows = d.get("rows") or []
+    counts = Counter(r.get("group") or "Other" for r in rows)
+    fresh = [r for r in rows if (r.get("status") or "New") == "New"]
+    fresh.sort(key=lambda r: (GROUP_ORDER.get(r.get("group"), 9), -(r.get("fit") or 0)))
+    top = fresh[:10]
+    week, total = d.get("applied_week", 0), d.get("applied_total", 0)
+    strong = counts["Strong"] + counts["Funded"]
+    subject = f"Morning summary: {_plural(len(rows), 'new job')}" + (f", {strong} strong" if strong else "") + f" · {week} applied this week"
+    parts = ", ".join(f"{counts[g]} {g.lower()}" for g in ("Funded", "Strong", "Good", "Other") if counts[g])
+    lines_html, lines_txt = [], []
+    for r in top:
+        fit = f"{r['fit']}%" if r.get("fit") is not None else "?"
+        meta = " · ".join(x for x in (r.get("company"), (r.get("location") or "")[:60], f"fit {fit}", r.get("group"), r.get("posted") and f"posted {r['posted']}") if x)
+        lines_html.append(f'<li style="margin:6px 0"><a href="{html.escape(r.get("url") or "")}" style="color:#1a56db;text-decoration:none;'
+                          f'font-weight:600">{html.escape(r.get("title") or "")}</a><br><span style="color:#555;font-size:13px">'
+                          f'{html.escape(meta)}</span>'
+                          + (f'<br><span style="color:#777;font-size:12px">{html.escape(r["flags"][:160])}</span>' if r.get("flags") else "")
+                          + "</li>")
+        lines_txt.append(f"- {r.get('title')} | {meta}\n  {r.get('url')}")
+    url = d.get("url", "")
+    since_txt = f"{_plural(len(rows), 'new job')} since the last summary" + (f" ({parts})" if parts else "") + "."
+    html_body = f"""<html><body style="font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:720px;margin:auto">
+<h2 style="margin-bottom:4px">Good morning</h2>
+<p style="color:#333">{html.escape(since_txt)} You applied to <b>{week}</b> in the last 7 days ({total} in all).</p>
+{_button(url, "Open your tracker")}
+{"<h3>Still marked New, best first</h3><ul style='padding-left:18px'>" + "".join(lines_html) + "</ul>" if top else "<p>Nothing new is waiting for you.</p>"}
+{f"<p style='color:#777'>{len(fresh) - len(top)} more are in the tracker.</p>" if len(fresh) > len(top) else ""}
+<p style="color:#aaa;font-size:11px">Sent by your job-finder · {now.strftime('%Y-%m-%d %H:%M UTC')}</p></body></html>"""
+    text_body = (f"{since_txt} You applied to {week} in the last 7 days ({total} in all).\n\n"
+                 + ("Still marked New, best first:\n" + "\n".join(lines_txt) if top else "Nothing new is waiting for you.")
+                 + (f"\n\nYour tracker: {url}" if url else ""))
     return subject, html_body, text_body
 
 

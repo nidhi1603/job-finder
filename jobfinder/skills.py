@@ -32,8 +32,8 @@ _RAW = {
     "Excel": r"\bexcel\b", "Tableau": r"\btableau\b", "Power BI": r"power ?bi",
     # backend / infra
     "FastAPI": r"\bfastapi\b", "Flask": r"\bflask\b", "Django": r"\bdjango\b", "Node.js": r"\bnode(?:\.js|js)?\b", "React": r"\breact\b", "Next.js": r"next\.js|\bnextjs\b",
-    "REST APIs": r"\brest(?:ful)?\b|\bapis?\b", "GraphQL": r"\bgraphql\b", "gRPC": r"\bgrpc\b", "Microservices": r"microservices?",
-    "Distributed Systems": r"distributed systems?", "System Design": r"system design|scalab", "PostgreSQL": r"\bpostgres(?:ql)?\b",
+    "REST APIs": r"\brestful\b|\brest(?:ful)?\s+(?:apis?|services|endpoints|interfaces)\b|\bapis?\s+(?:design|development)\b|\b(?:design|build|develop)(?:ing)?\s+(?:\w+\s+)?apis\b|\bweb apis?\b", "GraphQL": r"\bgraphql\b", "gRPC": r"\bgrpc\b", "Microservices": r"microservices?",
+    "Distributed Systems": r"distributed systems?", "System Design": r"systems? design\b", "PostgreSQL": r"\bpostgres(?:ql)?\b",
     "MySQL": r"\bmysql\b", "MongoDB": r"\bmongo(?:db)?\b", "Redis": r"\bredis\b", "Elasticsearch": r"elasticsearch|opensearch",
     "NoSQL": r"\bnosql\b|\bdynamodb\b|\bcassandra\b", "AWS": r"\baws\b|amazon web services|\bsagemaker\b|\bbedrock\b|\blambda\b|\bs3\b|\bec2\b",
     "GCP": r"\bgcp\b|google cloud|vertex ai", "Azure": r"\bazure\b", "Docker": r"\bdocker\b|containeri[sz]", "Kubernetes": r"\bkubernetes\b|\bk8s\b",

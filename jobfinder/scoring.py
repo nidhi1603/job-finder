@@ -14,21 +14,40 @@ from .skills import detect
 ROOT = Path(__file__).resolve().parent.parent
 
 
+# Knowing the left side implies the right side (TypeScript means you can read and write JavaScript, etc.).
+IMPLIED = {
+    "TypeScript": {"JavaScript"}, "React": {"JavaScript"}, "Next.js": {"JavaScript", "React"}, "Node.js": {"JavaScript"},
+    "FastAPI": {"REST APIs"}, "Flask": {"REST APIs"}, "Django": {"REST APIs"},
+    "PostgreSQL": {"SQL"}, "MySQL": {"SQL"}, "LoRA/QLoRA": {"Fine-tuning"},
+    "LangChain": {"LLMs"}, "LangGraph": {"LLMs"}, "LlamaIndex": {"LLMs"},
+}
+# Words that appear in almost every posting ("security", "monitoring", "systems design"); they say little
+# about fit, so they don't count toward the score either way.
+NON_SCORING = {"Security", "Observability", "System Design"}
+
+
+def with_implied(skills: set[str]) -> set[str]:
+    out = set(skills)
+    for s in skills:
+        out |= IMPLIED.get(s, set())
+    return out
+
+
 def load_profile() -> set[str]:
     """Your skills: PROFILE_SKILLS env/secret (comma-separated), else profile.local.json."""
     raw = os.environ.get("PROFILE_SKILLS", "").strip()
     if raw:
-        return {s.strip() for s in raw.split(",") if s.strip()}
+        return with_implied({s.strip() for s in raw.split(",") if s.strip()})
     local = ROOT / "profile.local.json"
     if local.exists():
-        return set(json.loads(local.read_text())["skills"])
+        return with_implied(set(json.loads(local.read_text())["skills"]))
     raise SystemExit("No profile: set PROFILE_SKILLS or create profile.local.json (python -m jobfinder.profile <resume>)")
 
 
 def score_fit(job: Job, profile: set[str]) -> None:
     required, preferred = split_sections(job.text or "")
-    req = detect(required)
-    pref = detect(preferred) - req
+    req = detect(required) - NON_SCORING
+    pref = detect(preferred) - req - NON_SCORING
     if not req and not pref:
         job.fit = None
         return
@@ -86,12 +105,14 @@ BANDS = ["Strong fit", "Good fit", "Other matches"]
 
 
 def fit_band(job: Job) -> int:
-    """0 = strong (70%+ with at least 4 skills detected), 1 = good (50%+), 2 = everything else."""
+    """0 = strong (70%+ with at least 4 skills detected), 1 = good (50%+ with at least 3), 2 = everything else.
+
+    The skill minimums stop a posting that names one skill you have from showing as a 100% fit."""
     if job.fit is None:
         return 2
     if job.fit >= 70 and job.skills_total >= 4:
         return 0
-    if job.fit >= 50:
+    if job.fit >= 50 and job.skills_total >= 3:
         return 1
     return 2
 

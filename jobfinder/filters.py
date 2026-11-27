@@ -27,7 +27,7 @@ def location_class(location: str) -> str:
     """'US', 'non-US' or 'unknown' from a location string."""
     if R.US_STRONG.search(location) or R.US_TOKEN.search(location):
         return "US"            # multi-location jobs that include a US city are kept
-    if R.NON_US_LOCATION.search(location):
+    if R.NON_US_LOCATION.search(location) or R.CA_PROVINCE_ABBR.search(location):
         return "non-US"
     if R.US_ABBR_STRICT.search(location):
         return "US"
@@ -130,10 +130,21 @@ def phd_only(title: str, required_text: str) -> bool:
     return needs_phd and not R.NON_PHD_ROUTE.search(title + "\n" + required_text)
 
 
+def charges_candidates(text: str) -> bool:
+    """The posting asks the candidate to pay a fee, deposit or bond (unless it says it doesn't)."""
+    for m in R.FEE_TERMS.finditer(text):
+        before = text[max(0, m.start() - 60): m.start()]
+        if not R.FEE_NEGATION.search(before) and not re.match(r"\s*(?:is|are)?\s*(?:waived|covered|paid) by", text[m.end(): m.end() + 30], re.I):
+            return True
+    return False
+
+
 def detail_rules(job: Job) -> str | None:
     text = job.text or ""
     if job_location_class(job) == "unknown" and not mentions_us(job.location + "\n" + text):
         return "location-unclear"
+    if charges_candidates(text):
+        return "charges-candidates"
     if R.CLEARANCE.search(text):
         return "clearance"
     if R.CITIZENSHIP.search(text):
@@ -163,6 +174,10 @@ def annotate(job: Job) -> None:
         job.flags.append("Degree: " + "/".join(reversed(degrees)))
     if is_intern(job):
         job.flags.append("Internship (accepts recent grads)")
+    if R.AGENCY.search(text):
+        job.flags.append("Agency (hiring for a client)")
+    if R.TRAINING_PLACEMENT.search(text):
+        job.flags.append("Training & placement program: check for fees")
     m = R.BOOST.search(job.title + "\n" + text)
     if m:
         job.boosts.append(m.group(0).strip())

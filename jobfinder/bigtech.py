@@ -249,8 +249,19 @@ def _country(city: dict | None) -> str:
     return (city or {}).get("en_name") or ""
 
 
+def tiktok_created(job_id) -> datetime | None:
+    """TikTok's feed has no posting date, but its job ids are snowflake ids: the top 32 bits are the
+    Unix time the requisition was created (7695929967028750645 -> 2026-10-12)."""
+    try:
+        ts = int(job_id) >> 32
+    except (TypeError, ValueError):
+        return None
+    created = datetime.fromtimestamp(ts, timezone.utc)
+    return created if datetime(2018, 1, 1, tzinfo=timezone.utc) <= created <= now_utc() + timedelta(days=1) else None
+
+
 async def tiktok_list(client, board: Board, window_days: int, max_pages: int) -> list[Job]:
-    """TikTok's feed has no posting date; the job's first-seen time stands in for it."""
+    """TikTok's feed has no posting date; the creation time encoded in the job id stands in for it."""
     out, seen = [], set()
     for kw in TIKTOK_KEYWORDS:
         for page in range(min(max_pages, 3)):
@@ -270,7 +281,7 @@ async def tiktok_list(client, board: Board, window_days: int, max_pages: int) ->
                 out.append(Job(
                     ats="tiktok", board="tiktok", job_id=str(j.get("id")), company="TikTok", title=j.get("title") or "",
                     location=f"{city}, United States" if city else "United States", url=f"https://lifeattiktok.com/search/{j.get('id')}",
-                    posted_at=None, posted_exact=False, country_hint="US",
+                    posted_at=tiktok_created(j.get("id")), posted_exact=False, country_hint="US",
                     text=f"{j.get('description') or ''}\n{j.get('requirement') or ''}", board_size=500,
                 ))
             if len(rows) < 50:

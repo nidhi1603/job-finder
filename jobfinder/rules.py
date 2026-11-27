@@ -18,8 +18,8 @@ TITLE_FAMILIES = {
 
 # Seniority in the title -> drop.
 SENIOR_TITLE = re.compile(
-    r"\b(senior|sr\.?|staff|principal|lead|manager|director|head of|vp|vice president|architect|"
-    r"distinguished|fellow|expert)\b|\b(ii|iii|iv|v)\b|\b(engineer|developer|scientist|analyst)\s*(2|3|4|5)\b|\bl[4-9]\b|\blevel\s*[2-9]\b", I)
+    r"\b(senior|sr\.?|staff|principal|leads?|managers?|directors?|head of|vp|vice president|architects?|"
+    r"distinguished|fellow|expert|mid[- ]?level|mid[- ]senior)\b|\b(ii|iii|iv|v)\b|\b(engineer|developer|scientist|analyst)\s*(2|3|4|5)\b|\bl[4-9]\b|\blevel\s*[2-9]\b", I)
 
 INTERN_TITLE = re.compile(r"\bintern(ship)?\b|\bco-?op\b", I)
 
@@ -44,7 +44,8 @@ US_ABBR_STRICT = re.compile(rf"(?:,\s*|\bUS\W+)({US_ABBR})\b")           # case-
 # Titles that match a family but aren't the job she wants.
 EXCLUDE_TITLE = re.compile(r"\b(sales|solutions?|support|customer|recruit\w*|marketing|account|pre-?sales|field)\b", I)
 NON_US_LOCATION = re.compile(
-    r"\b(canada|toronto|vancouver|montreal|ottawa|ontario|quebec|united kingdom|uk|england|london|scotland|ireland|"
+    r"\b(canada|toronto|vancouver|montreal|ottawa|ontario|quebec|british columbia|alberta|calgary|edmonton|winnipeg|"
+    r"manitoba|saskatchewan|nova scotia|halifax|new brunswick|newfoundland|mississauga|kitchener|waterloo, on|victoria, bc|united kingdom|uk|england|london|scotland|ireland|"
     r"dublin|germany|berlin|munich|france|paris|spain|madrid|barcelona|portugal|lisbon|netherlands|amsterdam|"
     r"belgium|switzerland|zurich|austria|vienna|poland|warsaw|krakow|czech|prague|romania|bucharest|hungary|"
     r"sweden|stockholm|norway|denmark|copenhagen|finland|italy|milan|rome|greece|israel|tel aviv|india|bangalore|"
@@ -53,6 +54,25 @@ NON_US_LOCATION = re.compile(
     r"malaysia|thailand|australia|sydney|melbourne|new zealand|mexico|brazil|são paulo|sao paulo|argentina|"
     r"buenos aires|colombia|bogota|chile|peru|costa rica|uruguay|south africa|nigeria|kenya|egypt|uae|dubai|"
     r"saudi|qatar|turkey|istanbul|ukraine|serbia|bulgaria|croatia|estonia|latvia|lithuania|emea|apac|latam|europe)\b", I)
+
+CA_PROVINCE_ABBR = re.compile(r",\s*(BC|AB|ON|QC|MB|SK|NS|NB|NL|PE)\b")     # case-sensitive "Vancouver, BC"
+
+# Drop: postings that ask the candidate to pay (training/placement/registration fees, deposits, bonds).
+# Agencies themselves are fine; "we never charge a placement fee" is not a match (negations are checked in filters.py).
+FEE_TERMS = re.compile(
+    r"\b(?:training|placement|registration|enrol(?:l)?ment|marketing|processing|onboarding|certification|bench)\s+fees?\b|"
+    r"\b(?:refundable|security)\s+deposit\b|\b(?:employment|service|training)\s+(?:agreement\s+)?bond\b|\bbond period\b|"
+    r"\b(?:candidates?|you|trainees?|applicants?|consultants?)\s+(?:will\s+(?:be\s+)?|must\s+|need\s+to\s+|are\s+(?:required|expected)\s+to\s+|"
+    r"have\s+to\s+)(?:pay|bear|cover)\s+(?:a|an|the|any|all|for)?\s*(?:one[- ]time\s+|upfront\s+|nominal\s+|small\s+)?"
+    r"(?:fees?|deposit|costs? of (?:training|placement|marketing))", I)
+FEE_NEGATION = re.compile(r"\b(?:no|never|not|without|free|zero|nor|don'?t|doesn'?t|do not|does not|won'?t|will not)\b[^.\n]{0,40}$", I)
+
+# Flags (shown, not dropped): recruiting agencies posting for a client, training-and-placement programs.
+AGENCY = re.compile(
+    r"on behalf of (?:our|a|one of our) clients?|\bour client(?:s)? (?:is|are)\b|this role is for one of our clients|"
+    r"(?:we are|we're) (?:a |an )?(?:staffing|recruiting|recruitment|talent) (?:agency|firm|company|partner)|"
+    r"is recruiting for this (?:role|position)|\bfor (?:a|our) client\b", I)
+TRAINING_PLACEMENT = re.compile(r"\btraining\s+(?:and|&)\s+placement\b|\bbench\s+(?:sales|marketing)\b", I)
 
 # Drop: security clearance.
 CLEARANCE = re.compile(

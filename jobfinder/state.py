@@ -1,7 +1,7 @@
 """What has already been evaluated or emailed (data/seen.json, saved to the "state" branch by the workflow).
 
 Stores only job keys, dates and a status code: no scores, no profile data.
-Status: e = emailed, f:<reason> = dropped by a rule, l = below the fit floor.
+Status: e = emailed, s = added to the tracker sheet, f:<reason> = dropped by a rule, l = below the fit floor.
 """
 from __future__ import annotations
 

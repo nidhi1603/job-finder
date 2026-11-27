@@ -106,7 +106,8 @@ def test_order_jobs_band_then_newest():
 
     jobs = [scored("strong-4h", 80, 10, 4), scored("good-1h", 60, 8, 1), scored("strong-2h", 75, 6, 2),
             scored("thin-100", 100, 2, 0.5), scored("weak-1h", 30, 9, 1)]
-    assert [j.title for j in order_jobs(jobs)] == ["strong-2h", "strong-4h", "thin-100", "good-1h", "weak-1h"]
+    # a 100% fit on only 2 skills is too thin for the Good band, so it sorts with the other matches (newest first)
+    assert [j.title for j in order_jobs(jobs)] == ["strong-2h", "strong-4h", "good-1h", "thin-100", "weak-1h"]
 
 
 def test_new_url_parsers():
@@ -131,3 +132,90 @@ def test_funding_helpers():
     assert m and m.group("name") == "Fauna Robotics"
     codes = [c for c, _ in yc_batches(date(2026, 11, 27), date(2026, 5, 29))]
     assert "S26" in codes and "F26" in codes and "W26" not in codes
+
+
+# ---------------------------------------------------------------- fixes after the first catch-up email
+
+def test_more_senior_titles_and_canada():
+    assert prefilter(job("Mid-Level AI Engineer"), NOW) == "senior-title"
+    assert prefilter(job("Managers, Data Science & Analytics"), NOW) == "senior-title"
+    assert location_class("British Columbia") == "non-US"
+    assert location_class("Vancouver, BC") == "non-US"
+    assert location_class("Calgary, Alberta") == "non-US"
+    assert location_class("Columbia, MD") == "US"
+    assert location_class("Washington, DC") == "US"
+
+
+def test_candidate_fees_drop_but_agencies_stay():
+    from jobfinder.filters import annotate, charges_candidates
+    assert charges_candidates("Candidates must pay a one-time training fee of $500 before placement.")
+    assert charges_candidates("A refundable deposit of $1,000 is required.")
+    assert charges_candidates("There is a bond period of 18 months.")
+    assert not charges_candidates("We never charge candidates a placement fee.")
+    assert not charges_candidates("There is no registration fee.")
+    assert not charges_candidates("Experience with bond trading and fixed income.")
+    agency = job(text="Raydar is recruiting for this role on behalf of our client. Python, SQL.")
+    assert detail_rules(agency) is None
+    annotate(agency)
+    assert "Agency (hiring for a client)" in agency.flags
+    assert detail_rules(job(text="Our OPT program: candidates will pay a nominal fee for marketing.")) == "charges-candidates"
+
+
+def test_tiktok_date_from_job_id():
+    from jobfinder.bigtech import tiktok_created
+    assert str(tiktok_created("7695929967028750645").date()) == "2026-10-12"
+    assert str(tiktok_created(7112323775379343623).date()) == "2022-06-23"
+    assert tiktok_created("not-a-number") is None
+
+
+def test_fit_needs_enough_skills_and_ignores_vague_words():
+    from jobfinder.scoring import fit_band, score_fit, with_implied
+    from jobfinder.skills import detect
+    assert "JavaScript" in with_implied({"TypeScript"}) and "REST APIs" in with_implied({"FastAPI"})
+    assert "REST APIs" not in detect("You'll work with the rest of the team on scalable systems.")
+    assert "REST APIs" in detect("Build RESTful APIs in Python.")
+    one = job(text="Requirements:\n- SQL")
+    score_fit(one, {"SQL"})
+    assert one.fit == 100 and fit_band(one) == 2          # one skill isn't enough to call it a fit
+    three = job(text="Requirements:\n- Python\n- SQL\n- Spark\n- security and monitoring")
+    score_fit(three, {"Python", "SQL"})
+    assert three.skills_total == 3 and fit_band(three) == 1   # security/monitoring don't count either way
+
+
+def test_merge_cities_and_alerts():
+    from jobfinder.run import is_alert, merge_cities
+    text = "Build recommendation models with PyTorch for e-commerce search and ranking at scale."
+    a = job("Machine Learning Engineer", "San Jose, CA", text)
+    b = job("Machine Learning Engineer", "Seattle, WA", text)
+    b.job_id = "2"
+    c = job("Machine Learning Engineer", "Boston, MA", "Our client is a fintech company. Kafka, Java, Spring, payments.")
+    c.job_id = "3"
+    merged = merge_cities([a, b, c])
+    assert len(merged) == 2 and merged[0].location == "San Jose, CA | Seattle, WA"
+    strong = job(text="Requirements:\n- Python\n- SQL\n- PyTorch\n- AWS")
+    from jobfinder.scoring import score_fit
+    score_fit(strong, {"Python", "SQL", "PyTorch", "AWS"})
+    assert is_alert(strong)
+
+
+def test_emails_render():
+    from jobfinder.emailer import render, render_summary
+    j = job(text="Requirements:\n- Python\n- SQL\n- PyTorch\n- AWS")
+    from jobfinder.scoring import score_fit
+    score_fit(j, {"Python", "SQL", "PyTorch", "AWS"})
+    subject, html_body, _ = render([j], NOW, 0, False, kind="alert", sheet_url="https://docs.google.com/x", others=5)
+    assert subject.startswith("1 strong match · top: Software Engineer @ Acme") and "Open your tracker" in html_body
+    rows = [{"status": "New", "fit": 80, "group": "Strong", "company": "Acme", "title": "MLE", "url": "https://x"},
+            {"status": "Applied", "fit": 60, "group": "Good", "company": "Beta", "title": "SWE", "url": "https://y"}]
+    subject, html_body, text_body = render_summary({"rows": rows, "applied_week": 3, "applied_total": 9, "url": "u"}, NOW)
+    assert subject == "Morning summary: 2 new jobs, 1 strong · 3 applied this week"
+    assert "MLE" in text_body and "SWE" not in text_body      # only rows still marked New are listed
+
+
+def test_sheet_row_shape():
+    from jobfinder.sheet import job_row
+    j = job(text="Requirements:\n- Python")
+    j.flags = ["No sponsorship"]
+    row = job_row(j)
+    assert row["key"] == "greenhouse:acme:1" and row["group"] == "Other" and row["flags"] == "No sponsorship"
+    assert row["posted"] == j.posted_at.strftime("%Y-%m-%d")
