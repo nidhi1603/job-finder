@@ -48,6 +48,9 @@ def test_years_of_experience():
     assert min_years_required("Bachelor's with 3+ years of experience, or Master's with 1+ year of experience.") == 1
     assert min_years_required("4-year degree in CS. Two years of hands-on experience with Python.") == 2
     assert min_years_required("Strong Python skills") is None
+    bullets = ("Basic Qualifications:\n- 3+ years of professional software development experience\n"
+               "- 2+ years of design experience\n- 1+ years of software development engineer experience")
+    assert min_years_required(bullets) == 3
 
 
 def test_detail_rules():
@@ -104,3 +107,27 @@ def test_order_jobs_band_then_newest():
     jobs = [scored("strong-4h", 80, 10, 4), scored("good-1h", 60, 8, 1), scored("strong-2h", 75, 6, 2),
             scored("thin-100", 100, 2, 0.5), scored("weak-1h", 30, 9, 1)]
     assert [j.title for j in order_jobs(jobs)] == ["strong-2h", "strong-4h", "thin-100", "good-1h", "weak-1h"]
+
+
+def test_new_url_parsers():
+    assert parse_ats_url("https://careers-capbluecross.icims.com/jobs/5306/intern/job") == ("icims", "careers-capbluecross.icims.com", "5306")
+    assert parse_ats_url("https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210512345") == \
+        ("oraclecloud", "jpmc.fa.oraclecloud.com|CX_1001", "210512345")
+    assert parse_ats_url("https://www.amazon.jobs/en/jobs/10614480/software-development-engineer") == ("amazon", "amazon", "10614480")
+    assert parse_ats_url("https://jobs.apple.com/en-us/details/200696384/ar-vr-software-engineer") == ("apple", "apple", "200696384")
+
+
+def test_funding_helpers():
+    from jobfinder.funding import FUND_NAME, RAISE, clean_name, key_of, yc_batches
+    from datetime import date
+    assert clean_name("Acme Robotics, Inc.") == "Acme Robotics"
+    assert key_of("Acme Robotics, Inc.") == "acmerobotics"
+    assert FUND_NAME.search("AT SPV 1026 a Series of CGF2026 LLC")
+    assert FUND_NAME.search("Slow Rush Ventures, LP - Series 2")
+    assert not FUND_NAME.search("Acme Robotics")
+    m = RAISE.search("Spend management platform Payhawk announces $280M raise, 2B valuation")
+    assert m and m.group("name") == "Payhawk"
+    m = RAISE.search("Fauna Robotics raises $30M Series A to build home robots")
+    assert m and m.group("name") == "Fauna Robotics"
+    codes = [c for c, _ in yc_batches(date(2026, 11, 27), date(2026, 5, 29))]
+    assert "S26" in codes and "F26" in codes and "W26" not in codes

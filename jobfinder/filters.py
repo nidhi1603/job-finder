@@ -103,7 +103,7 @@ def min_years_required(required_text: str) -> int | None:
     across sentences the strictest requirement wins.
     """
     best = None
-    for sentence in re.split(r"(?<=[.;\n])\s+", required_text):
+    for sentence in re.split(r"\n+|(?<=[.;])\s+", required_text):
         mins = []
         for m in _YOE.finditer(sentence):
             after = sentence[m.end(): m.end() + 90]
@@ -126,7 +126,7 @@ def phd_only(title: str, required_text: str) -> bool:
     """A PhD is required (in the title or a non-'preferred' requirement) with no other degree route."""
     needs_phd = bool(R.PHD.search(title)) or any(
         R.PHD.search(s) and not R.NOT_REQUIRED_WORDS.search(s)
-        for s in re.split(r"(?<=[.;\n])\s+", required_text))
+        for s in re.split(r"\n+|(?<=[.;])\s+", required_text))
     return needs_phd and not R.NON_PHD_ROUTE.search(title + "\n" + required_text)
 
 

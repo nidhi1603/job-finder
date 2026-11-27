@@ -60,6 +60,34 @@ def parse_ats_url(url: str) -> tuple[str, str | None, str | None] | None:
             jid = re.sub(r"/apply(/.*)?$", "", jid)
         return ("workday", f"{host}|{tenant}|{site}", jid)
 
+    if host.endswith(".icims.com") and host not in ("www.icims.com", "icims.com") and not host.startswith(("community.", "developer.")):
+        m = re.search(r"/jobs/(\d+)", u.path)
+        return ("icims", host, m.group(1) if m else None)
+
+    if re.fullmatch(r"[a-z0-9-]+\.fa(\.[a-z0-9-]+)?\.oraclecloud\.com", host) and "CandidateExperience" in u.path:
+        m = re.search(r"/sites/([A-Za-z0-9_]+)", u.path)
+        if m:
+            j = re.search(r"/job/(\d+)", u.path)
+            return ("oraclecloud", f"{host}|{m.group(1)}", j.group(1) if j else None)
+        return None
+
+    # Big-company sites (used to spot their jobs on the SimplifyJobs list)
+    if host.endswith("amazon.jobs"):
+        m = re.search(r"/jobs/(\d+)", u.path)
+        return ("amazon", "amazon", m.group(1) if m else None)
+    if host == "jobs.apple.com":
+        m = re.search(r"/details/(\d+)", u.path)
+        return ("apple", "apple", m.group(1) if m else None)
+    if host.endswith("careers.microsoft.com"):
+        m = re.search(r"/job/(\d+)", u.path)
+        return ("microsoft", "microsoft.com", m.group(1) if m else None)
+    if host in ("www.google.com", "careers.google.com") and "careers" in u.path:
+        m = re.search(r"/results/(\d+)", u.path)
+        return ("google", "google", m.group(1) if m else None)
+    if host.endswith("lifeattiktok.com"):
+        m = re.search(r"/search/(\d+)", u.path)
+        return ("tiktok", "tiktok", m.group(1) if m else None)
+
     if re.fullmatch(r"wd\d+\.myworkdaysite\.com", host) and len(parts) >= 3 and parts[0] == "recruiting":
         tenant, site = parts[1], parts[2]
         jid = None

@@ -45,6 +45,7 @@ class Job:
     skills_total: int = 0
     matched: list[str] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
+    funding: str = ""                 # e.g. "$20M Series A (TechCrunch) · 2026-10" for recently funded startups
     crowd: int = 0
     crowd_reasons: list[str] = field(default_factory=list)
 

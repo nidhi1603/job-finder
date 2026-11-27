@@ -26,11 +26,14 @@ CC_COLLINFO = "https://index.commoncrawl.org/collinfo.json"
 CC_QUERIES = [
     ("boards.greenhouse.io/*", "prefix"), ("job-boards.greenhouse.io/*", "prefix"), ("jobs.lever.co/*", "prefix"),
     ("jobs.ashbyhq.com/*", "prefix"), ("apply.workable.com/*", "prefix"), ("myworkdayjobs.com", "domain"),
+    ("icims.com", "domain"), ("oraclecloud.com", "domain"),
 ]
+MAX_CC_PAGES = 60          # per query; oraclecloud.com is mostly non-careers pages
+SKIP_ATS = {"amazon", "apple", "microsoft", "google", "tiktok", "ibm"}   # read directly (bigtech.py)
 
 
 def add(boards: dict, ats: str, token: str | None, name: str, tier: str) -> None:
-    if not token:
+    if not token or ats in SKIP_ATS:
         return
     key = (ats, token)
     if key not in boards:
@@ -76,7 +79,7 @@ async def from_common_crawl(client: httpx.AsyncClient, boards: dict, crawls: int
                 base["matchType"] = "domain"
             r = await _cc_get(client, api, {**base, "showNumPages": "true"})
             pages = (r.json().get("pages", 0) if r else 0)
-            for page in range(pages):
+            for page in range(min(pages, MAX_CC_PAGES)):
                 r = await _cc_get(client, api, {**base, "page": str(page)})
                 if not r:
                     continue
@@ -102,7 +105,7 @@ async def probe(boards: list[Board], concurrency: int) -> list[Board]:
     for b, jobs in zip(boards, results):
         if not jobs:
             continue
-        if b.ats != "workday" and not any(j.country_hint == "US" or location_class(j.location) != "non-US" for j in jobs):
+        if b.ats not in ("workday", "icims", "oraclecloud") and not any(j.country_hint == "US" or location_class(j.location) != "non-US" for j in jobs):
             continue
         if not b.name:
             b.name = jobs[0].company if jobs[0].company != b.token else ""

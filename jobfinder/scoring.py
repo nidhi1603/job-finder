@@ -97,5 +97,5 @@ def fit_band(job: Job) -> int:
 
 
 def order_jobs(jobs: list[Job]) -> list[Job]:
-    """Best fit band first; inside each band the most recently posted job comes first."""
-    return sorted(jobs, key=lambda j: (fit_band(j), -(j.posted_at.timestamp() if j.posted_at else 0)))
+    """Recently funded startups first; then best fit band; inside each group the newest posting first."""
+    return sorted(jobs, key=lambda j: (0 if j.funding else 1, fit_band(j), -(j.posted_at.timestamp() if j.posted_at else 0)))

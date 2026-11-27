@@ -19,7 +19,9 @@ from pathlib import Path
 import httpx
 
 from . import emailer
+from .bigtech import BIGTECH_BOARDS
 from .filters import annotate, detail_rules, prefilter
+from .funding import funded_boards
 from .models import Board, Job
 from .scoring import load_profile, order_jobs, score_crowd, score_fit
 from .sources import fetch_detail, list_board, make_client, make_limits
@@ -36,6 +38,20 @@ MAX_EMAIL_JOBS = 150
 
 def load_boards() -> list[Board]:
     return [Board(**b) for b in json.loads(BOARDS.read_text())]
+
+
+EVERY_RUN = {"newgrad", "bigtech", "funded"}   # the broad sweep is split across 4 hours
+_TIER_RANK = {"funded": 0, "bigtech": 1, "newgrad": 2, "broad": 3}
+
+
+def merge_boards(boards: list[Board]) -> list[Board]:
+    """One entry per board; a board listed in several places keeps its highest-priority tier."""
+    best: dict[tuple[str, str], Board] = {}
+    for b in boards:
+        k = (b.ats, b.token)
+        if k not in best or _TIER_RANK.get(b.tier, 9) < _TIER_RANK.get(best[k].tier, 9):
+            best[k] = Board(b.ats, b.token, b.name or (best[k].name if k in best else ""), b.tier)
+    return list(best.values())
 
 
 def bucket(board: Board) -> int:
@@ -68,14 +84,15 @@ async def run(args) -> None:
         return
     profile = load_profile()
     min_fit = int(os.environ.get("MIN_FIT") or 0)
-    boards = load_boards()
+    funded, funding_labels = funded_boards()
+    boards = merge_boards(funded + BIGTECH_BOARDS + load_boards())
     state = State.load()
     catch_up = state.is_empty()
     if args.all or catch_up:
         selected = boards
     else:
         b_now = now.hour % BROAD_BUCKETS
-        selected = [b for b in boards if b.tier == "newgrad" or bucket(b) == b_now]
+        selected = [b for b in boards if b.tier in EVERY_RUN or bucket(b) == b_now]
     if args.limit:
         selected = selected[: args.limit]
     last_run = parse_iso(state.meta.get("last_run"))
@@ -123,6 +140,7 @@ async def run(args) -> None:
             stats["drop:" + reason] += 1
             continue
         annotate(job)
+        job.funding = funding_labels.get((job.ats, job.board), "")
         score_fit(job, profile)
         mid = match_id(job.ats, job.board, job.job_id)
         score_crowd(job, now, on_simplify=bool(mid and mid in simplify_ids), reposted=state.was_reposted(job))

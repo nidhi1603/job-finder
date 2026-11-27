@@ -25,7 +25,7 @@ WORKDAY_MAX_AGE_DAYS = 15
 def make_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(
         timeout=httpx.Timeout(25.0, connect=10.0),
-        headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+        headers={"User-Agent": USER_AGENT, "Accept": "application/json", "Accept-Encoding": "gzip, deflate"},
         limits=httpx.Limits(max_connections=48, max_keepalive_connections=24),
         follow_redirects=True,
     )
@@ -248,23 +248,36 @@ LISTERS = {
 }
 DETAILERS = {"greenhouse": greenhouse_detail, "workday": workday_detail}
 
-# Workday serves every company from shared infrastructure and answers bursts with HTTP 429,
-# so it gets its own small lane: a few companies at a time, a pause after every request.
+# Workday, iCIMS and Oracle Recruiting Cloud serve many companies from shared infrastructure
+# and answer bursts with HTTP 429, so they share a small "slow" lane: a few companies at a
+# time and a pause after every request.
+SLOW_ATS = {"workday", "icims", "oraclecloud", "ycjobs"}
 WORKDAY_CONCURRENCY = 4
 WORKDAY_DELAY = 0.4
+# (catch-up pages, hourly pages) for readers whose lists are paged newest-first
+MAX_PAGES = {"workday": (WORKDAY_MAX_PAGES, WORKDAY_MAX_PAGES), "icims": (5, 2)}
+DEFAULT_PAGES = (40, 40)
 
 
 def make_limits(concurrency: int = 32) -> dict[str, asyncio.Semaphore]:
-    return {"default": asyncio.Semaphore(concurrency), "workday": asyncio.Semaphore(WORKDAY_CONCURRENCY)}
+    return {"default": asyncio.Semaphore(concurrency), "slow": asyncio.Semaphore(WORKDAY_CONCURRENCY)}
+
+
+def _lane(ats: str) -> str:
+    return "slow" if ats in SLOW_ATS else "default"
 
 
 async def list_board(client, board: Board, limits: dict, window_days: int = WORKDAY_MAX_AGE_DAYS,
                      max_pages: int | None = None) -> list[Job]:
-    sem = limits["workday" if board.ats == "workday" else "default"]
-    async with sem:
+    from .bigtech import PAGED_LISTERS
+    async with limits[_lane(board.ats)]:
         try:
+            catch_up = window_days >= WORKDAY_MAX_AGE_DAYS
+            pages = max_pages or MAX_PAGES.get(board.ats, DEFAULT_PAGES)[0 if catch_up else 1]
             if board.ats == "workday":
-                return await workday_list(client, board, window_days, max_pages or WORKDAY_MAX_PAGES)
+                return await workday_list(client, board, window_days, pages)
+            if board.ats in PAGED_LISTERS:
+                return await PAGED_LISTERS[board.ats](client, board, window_days, pages)
             return await LISTERS[board.ats](client, board)
         except Exception as e:  # one broken board must not stop the run
             log.debug("board %s:%s failed: %s", board.ats, board.token, e)
@@ -272,13 +285,14 @@ async def list_board(client, board: Board, limits: dict, window_days: int = WORK
 
 
 async def fetch_detail(client, job: Job, limits: dict) -> None:
-    fn = DETAILERS.get(job.ats)
+    from .bigtech import BIG_DETAILERS
+    fn = DETAILERS.get(job.ats) or BIG_DETAILERS.get(job.ats)
     if not fn:
         return
-    async with limits["workday" if job.ats == "workday" else "default"]:
+    async with limits[_lane(job.ats)]:
         try:
             await fn(client, job)
         except Exception as e:
             log.debug("detail %s failed: %s", job.key, e)
-        if job.ats == "workday":
+        if job.ats in SLOW_ATS:
             await asyncio.sleep(WORKDAY_DELAY)
