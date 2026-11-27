@@ -1,0 +1,51 @@
+name: poll
+
+on:
+  schedule:
+    - cron: "17 * * * *"        # hourly, off the top of the hour (GitHub runs can start 5-30 min late)
+  workflow_dispatch:
+    inputs:
+      all:
+        description: "Check every board this run"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: job-finder-state
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Load seen-jobs state (kept on the 'state' branch so main's history stays small)
+        run: |
+          git fetch -q origin state 2>/dev/null && git show FETCH_HEAD:data/seen.json > data/seen.json || echo "no state yet: catch-up run"
+      - name: Find, filter and email new jobs
+        run: python -m jobfinder.run ${{ inputs.all && '--all' || '' }}
+        env:
+          PROFILE_SKILLS: ${{ secrets.PROFILE_SKILLS }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          MIN_FIT: ${{ vars.MIN_FIT }}
+      - name: Save seen-jobs state
+        run: |
+          [ -f data/seen.json ] || exit 0
+          git config user.name "job-finder-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q --orphan state-tmp
+          git rm -rq --cached .
+          git add -f data/seen.json
+          git commit -q -m "state: $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -qf origin state-tmp:state

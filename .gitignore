@@ -1,0 +1,8 @@
+profile.local.json
+out/
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+data/seen.json
+SPEC.md
