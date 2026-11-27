@@ -91,3 +91,16 @@ def test_phd_only():
     assert not phd_only("ML Engineer", "PhD in ML, or equivalent practical experience")
     assert not phd_only("Data Scientist", "Bachelor's degree in a quantitative field")
     assert detail_rules(job("Research Scientist", text="Qualifications:\n- PhD in Machine Learning")) == "phd-only"
+
+
+def test_order_jobs_band_then_newest():
+    from jobfinder.scoring import order_jobs
+
+    def scored(name, fit, skills, hours):
+        j = job(name)
+        j.fit, j.skills_total, j.posted_at = fit, skills, NOW - timedelta(hours=hours)
+        return j
+
+    jobs = [scored("strong-4h", 80, 10, 4), scored("good-1h", 60, 8, 1), scored("strong-2h", 75, 6, 2),
+            scored("thin-100", 100, 2, 0.5), scored("weak-1h", 30, 9, 1)]
+    assert [j.title for j in order_jobs(jobs)] == ["strong-2h", "strong-4h", "thin-100", "good-1h", "weak-1h"]

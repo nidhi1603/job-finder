@@ -31,7 +31,8 @@ to catch jobs within hours of posting, before they reach LinkedIn and fill up wi
    - **Fit**: the share of the posting's detected skills that appear in your skills list. Required skills count double.
    - **Crowding**: an estimate from job age, company size (open jobs on its board), whether the job is on the
      SimplifyJobs list, and reposts.
-5. **Email**: one digest per run, sent only when something new passed, best fit first. The very first run
+5. **Email**: one digest per run, sent only when something new passed. Jobs are grouped into Strong fit
+   (70%+ with 4+ skills), Good fit (50%+) and Other matches, with the most recently posted first inside each group. The very first run
    sends a catch-up of the last 15 days.
 6. **No repeats**: `data/seen.json` (job keys and dates only) lives on the `state` branch.
 

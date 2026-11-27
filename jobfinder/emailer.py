@@ -9,10 +9,13 @@ from datetime import datetime
 from email.message import EmailMessage
 from pathlib import Path
 
+from collections import Counter
+
 from .models import Job
-from .scoring import crowd_label
+from .scoring import BANDS, crowd_label, fit_band
 
 ROOT = Path(__file__).resolve().parent.parent
+BAND_RULES = ["70%+ fit, 4+ skills", "50%+ fit", "below 50% or no skills listed"]
 
 
 def _ago(job: Job, now: datetime) -> str:
@@ -30,7 +33,16 @@ def render(jobs: list[Job], now: datetime, extra: int, catch_up: bool) -> tuple[
     kind = "catch-up: " if catch_up else ""
     subject = f"Job Finder {kind}{len(jobs) + extra} new match{'es' if len(jobs) + extra != 1 else ''} · top: {top.title} @ {top.company}"
     rows_html, rows_txt = [], []
+    counts = Counter(fit_band(j) for j in jobs)
+    current = None
     for j in jobs:
+        band = fit_band(j)
+        if band != current:
+            current = band
+            label = f"{BANDS[band]} ({BAND_RULES[band]}) · {counts[band]} job{'s' if counts[band] != 1 else ''}, newest first"
+            rows_html.append(f'<tr><td style="padding:18px 0 4px;font-size:13px;font-weight:700;color:#111;'
+                             f'text-transform:uppercase;letter-spacing:.04em;border-bottom:2px solid #111">{html.escape(label)}</td></tr>')
+            rows_txt.append(f"\n== {label} ==")
         fit = f"{j.fit}% ({len(j.matched)}/{j.skills_total} skills)" if j.fit is not None else "? (no skills listed)"
         crowd = f"{crowd_label(j.crowd)} crowding" + (f" ({', '.join(j.crowd_reasons)})" if j.crowd_reasons else "")
         badges = "".join(
@@ -52,7 +64,8 @@ def render(jobs: list[Job], now: datetime, extra: int, catch_up: bool) -> tuple[
                         f"{' | ' + '; '.join(j.flags) if j.flags else ''}\n  {j.url}")
     more = f"<p style='color:#777'>+{extra} more lower-ranked matches not shown.</p>" if extra else ""
     html_body = f"""<html><body style="font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:720px;margin:auto">
-<p style="color:#555">{len(jobs) + extra} new job{'s' if len(jobs) + extra != 1 else ''} that passed your rules, best fit first.
+<p style="color:#555">{len(jobs) + extra} new job{'s' if len(jobs) + extra != 1 else ''} that passed your rules, grouped by fit
+(strong, good, other) with the most recently posted first inside each group.
 Fit = share of the posting's skills found on your resume (required skills count double). Crowding is an estimate.</p>
 <table style="width:100%;border-collapse:collapse">{''.join(rows_html)}</table>{more}
 <p style="color:#aaa;font-size:11px">Sent by your job-finder · {now.strftime('%Y-%m-%d %H:%M UTC')}</p></body></html>"""

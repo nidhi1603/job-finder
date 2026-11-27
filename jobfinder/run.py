@@ -21,7 +21,7 @@ import httpx
 from . import emailer
 from .filters import annotate, detail_rules, prefilter
 from .models import Board, Job
-from .scoring import load_profile, score_crowd, score_fit
+from .scoring import load_profile, order_jobs, score_crowd, score_fit
 from .sources import fetch_detail, list_board, make_client, make_limits
 from .state import State
 from .text import now_utc, parse_iso
@@ -132,8 +132,7 @@ async def run(args) -> None:
             continue
         passed.append(job)
 
-    passed.sort(key=lambda j: (-j.fit_rank - (10 if j.boosts else 0),
-                               -(j.posted_at.timestamp() if j.posted_at else 0)))
+    passed = order_jobs(passed)
     unique, seen_listing = [], set()
     for j in passed:              # same company + title + location posted under several req IDs
         listing = (j.company.lower(), j.title.lower().strip(), j.location.lower().strip())

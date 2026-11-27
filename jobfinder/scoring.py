@@ -79,3 +79,23 @@ def score_crowd(job: Job, now: datetime, on_simplify: bool, reposted: bool) -> N
 
 def crowd_label(score: int) -> str:
     return "Low" if score < 30 else "Medium" if score < 55 else "High"
+
+
+# ------------------------------------------------------------------ email order
+BANDS = ["Strong fit", "Good fit", "Other matches"]
+
+
+def fit_band(job: Job) -> int:
+    """0 = strong (70%+ with at least 4 skills detected), 1 = good (50%+), 2 = everything else."""
+    if job.fit is None:
+        return 2
+    if job.fit >= 70 and job.skills_total >= 4:
+        return 0
+    if job.fit >= 50:
+        return 1
+    return 2
+
+
+def order_jobs(jobs: list[Job]) -> list[Job]:
+    """Best fit band first; inside each band the most recently posted job comes first."""
+    return sorted(jobs, key=lambda j: (fit_band(j), -(j.posted_at.timestamp() if j.posted_at else 0)))
