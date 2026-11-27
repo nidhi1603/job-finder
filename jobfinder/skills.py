@@ -1,6 +1,6 @@
 """Generic tech-skills dictionary: canonical name -> regex. Public and profile-free.
 
-Which of these skills Nidhi has lives in the PROFILE_SKILLS secret (or profile.local.json),
+Which of these skills you have lives in the PROFILE_SKILLS secret (or profile.local.json),
 never in this repo.
 """
 import re
