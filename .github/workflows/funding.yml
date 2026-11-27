@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: job-finder-state
+  group: job-finder-funding
   cancel-in-progress: false
 
 jobs:
