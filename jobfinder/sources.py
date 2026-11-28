@@ -287,8 +287,9 @@ DETAILERS = {"greenhouse": greenhouse_detail, "workday": workday_detail}
 # each). Lanes for different hosts run side by side: Workday's ~12 server groups (wd1, wd5, ...) no longer
 # wait on each other or on Y Combinator.
 SLOW_ATS = {"workday", "icims", "oraclecloud", "ycjobs"}
-LANE_LIMITS = {"workday": 2, "icims": 2, "oraclecloud": 2, "ycjobs": 3}
+LANE_LIMITS = {"workday": 2, "icims": 2, "oraclecloud": 2, "ycjobs": 2}
 WORKDAY_DELAY = 0.4
+LANE_DELAY = {"ycjobs": 1.0}             # pause after each request; Y Combinator answers 429 to anything faster
 # (catch-up pages, hourly pages) for readers whose lists are paged newest-first
 MAX_PAGES = {"workday": (WORKDAY_MAX_PAGES, WORKDAY_MAX_PAGES), "icims": (5, 2)}
 DEFAULT_PAGES = (40, 40)
@@ -333,7 +334,7 @@ async def list_board(client, board: Board, limits: dict, window_days: int = WORK
             if board.ats in PAGED_LISTERS:
                 jobs = await PAGED_LISTERS[board.ats](client, board, window_days, pages)
                 if board.ats in SLOW_ATS:
-                    await asyncio.sleep(WORKDAY_DELAY)
+                    await asyncio.sleep(LANE_DELAY.get(board.ats, WORKDAY_DELAY))
                 return jobs
             return await LISTERS[board.ats](client, board)
         except Exception as e:  # one broken board must not stop the run
@@ -352,4 +353,4 @@ async def fetch_detail(client, job: Job, limits: dict) -> None:
         except Exception as e:
             log.debug("detail %s failed: %s", job.key, e)
         if job.ats in SLOW_ATS:
-            await asyncio.sleep(WORKDAY_DELAY)
+            await asyncio.sleep(LANE_DELAY.get(job.ats, WORKDAY_DELAY))

@@ -229,3 +229,37 @@ def test_slow_lanes_by_shared_host():
     assert _lane("ycjobs", "fluxcap") == "ycjobs" and _lane("greenhouse", "acme") == "default"
     assert host_group("https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/Ext/jobs") == "workday:wd5"
     assert host_group("https://www.ycombinator.com/companies/x/jobs") == "ycombinator"
+
+
+def test_send_without_credentials_writes_a_file(tmp_path, monkeypatch):
+    from jobfinder import emailer
+    for k in ("EMAIL_FROM", "EMAIL_TO", "GMAIL_APP_PASSWORD"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(emailer, "ROOT", tmp_path)
+    assert emailer.send("s", "<p>hi</p>", "hi", NOW) is False
+    assert list((tmp_path / "out").glob("digest-*.html"))
+
+
+def test_run_module_calls_exist():
+    # every emailer/sheet function run.py calls must exist (catches a deleted helper before it reaches GitHub)
+    import re
+    from pathlib import Path
+    from jobfinder import emailer, sheet
+    src = Path(__file__).resolve().parent.parent.joinpath("jobfinder/run.py").read_text()
+    for mod, name in re.findall(r"\b(emailer|sheet)\.([a-z_]+)\(", src):
+        assert hasattr({"emailer": emailer, "sheet": sheet}[mod], name), f"{mod}.{name} is missing"
+
+
+def test_send_daily_email_end_to_end(monkeypatch):
+    from jobfinder import emailer, run, sheet
+    from jobfinder.scoring import score_fit
+    from jobfinder.state import State
+    sent = {}
+    monkeypatch.setattr(sheet, "summary", lambda since: {"rows": [], "applied_week": 2, "applied_total": 5, "url": "u"})
+    monkeypatch.setattr(emailer, "send", lambda subject, h, t, now: sent.update(subject=subject) or True)
+    j = job(text="Requirements:\n- Python\n- SQL\n- PyTorch\n- AWS")
+    score_fit(j, {"Python", "SQL", "PyTorch", "AWS"})
+    assert run.send_daily_email([j], "https://sheet", State(), NOW) is True
+    assert sent["subject"].startswith("Today's jobs: 1 new match, 1 strong")
+    assert run.send_daily_email([], "https://sheet", State(), NOW) is True
+    assert sent["subject"] == "Today's jobs: nothing new · 2 applied this week"

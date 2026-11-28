@@ -16,7 +16,7 @@ import asyncio
 import json
 import time
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx

@@ -126,3 +126,23 @@ def render_daily(new_jobs: list[Job], picks: list[Job], info: dict, sheet_url: s
              + (f" The other {_plural(rest, 'job')} {'is' if rest == 1 else 'are'} in your tracker." if rest > 0 else "")
              + " Mark the ones you apply to as Applied.")
     return render(picks, now, 0, False, sheet_url=sheet_url, subject=subject, intro=intro)
+
+
+def send(subject: str, html_body: str, text_body: str, now: datetime) -> bool:
+    """Returns True if emailed. Without credentials, writes out/digest-*.html and returns False."""
+    sender, to, password = (os.environ.get(k, "").strip() for k in ("EMAIL_FROM", "EMAIL_TO", "GMAIL_APP_PASSWORD"))
+    if not (sender and to and password):
+        out = ROOT / "out"
+        out.mkdir(exist_ok=True)
+        path = out / f"digest-{now.strftime('%Y%m%d-%H%M')}.html"
+        path.write_text(html_body)
+        print(f"[dry-run] email not configured; digest written to {path}")
+        return False
+    msg = EmailMessage()
+    msg["Subject"], msg["From"], msg["To"] = subject, sender, to
+    msg.set_content(text_body)
+    msg.add_alternative(html_body, subtype="html")
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ssl.create_default_context(), timeout=30) as s:
+        s.login(sender, password)
+        s.send_message(msg)
+    return True
