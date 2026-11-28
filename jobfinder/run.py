@@ -121,6 +121,10 @@ def maybe_send_summary(state: State, now, args) -> None:
     tz = ZoneInfo(os.environ.get("SUMMARY_TZ") or "America/New_York")
     local = now.astimezone(tz)
     today = local.strftime("%Y-%m-%d")
+    if "last_summary" not in state.meta:          # first run with the tracker: start counting now, first summary tomorrow
+        state.meta["last_summary"] = today
+        state.meta["last_summary_at"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        return
     if local.hour < int(os.environ.get("SUMMARY_HOUR") or 8) or state.meta.get("last_summary") == today:
         return
     since = state.meta.get("last_summary_at") or (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -233,7 +237,9 @@ async def run(args) -> None:
                 subject, html_body, text_body = emailer.render(
                     alerts, now, 0, False, kind="alert", sheet_url=res.get("url", ""), others=len(unique) - len(alerts))
                 print(("emailed: " if emailer.send(subject, html_body, text_body, now) else "not emailed: ") + subject)
-            if not args.backfill:
+            if args.backfill:
+                state.meta.setdefault("last_summary_at", now.strftime("%Y-%m-%dT%H:%M:%SZ"))
+            else:
                 maybe_send_summary(state, now, args)
         else:
             print("tracker sheet failed, so this run emails the full list instead (nothing is lost)")
