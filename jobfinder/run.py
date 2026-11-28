@@ -31,7 +31,7 @@ from .filters import annotate, detail_rules, prefilter
 from .funding import funded_boards
 from .models import Board, Job
 from .scoring import fit_band, load_profile, norm_title, order_jobs, score_crowd, score_fit
-from .sources import fetch_detail, list_board, make_client, make_limits
+from .sources import HTTP_STATS, fetch_detail, list_board, make_client, make_limits
 from .state import State
 from .text import now_utc, parse_iso
 from .urls import match_id, parse_ats_url
@@ -155,7 +155,8 @@ async def run(args) -> None:
         selected = boards
     else:
         slot = (now.hour * 2 + now.minute // 30) % BROAD_BUCKETS     # runs at :17 and :47 cover different slots
-        selected = [b for b in boards if b.tier in EVERY_RUN or bucket(b) == slot]
+        # Y Combinator company pages (~570, one request each) rotate like the broad sweep: each every ~2 hours
+        selected = [b for b in boards if (b.tier in EVERY_RUN and b.ats != "ycjobs") or bucket(b) == slot]
     if args.limit:
         selected = selected[: args.limit]
     last_run = parse_iso(state.meta.get("last_run"))
@@ -259,6 +260,10 @@ async def run(args) -> None:
         print("state not saved (dry run, or neither email nor the tracker sheet is set up)")
 
     print(f"boards checked: {len(selected)} ({'all' if full else 'hourly slice'}) in {time.time() - t0:.0f}s")
+    if HTTP_STATS:
+        print("rate limiting (429 answers / boards given up on), by host group:")
+        for k, v in sorted(HTTP_STATS.items(), key=lambda kv: -kv[1])[:15]:
+            print(f"  {k}: {v}")
     for k, v in sorted(stats.items()):
         print(f"  {k}: {v}")
 

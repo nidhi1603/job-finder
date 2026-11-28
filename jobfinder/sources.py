@@ -6,10 +6,15 @@ board: a dead or blocked board just returns [] so one company can't break a run.
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 import logging
 import random
+import re
+import time
 
 import httpx
+
+_WD_SHARD = re.compile(r"\b(wd\d+)\.")
 
 from .models import Board, Job
 from .text import from_epoch_ms, html_to_text, now_utc, parse_iso, parse_workday_posted
@@ -31,20 +36,49 @@ def make_client() -> httpx.AsyncClient:
     )
 
 
+# Rate limiting is tracked per shared host group (each Workday server group, Y Combinator, ...). When a group
+# answers 429 every request to it pauses until the cooldown ends, so we slow down instead of hammering.
+HTTP_STATS: Counter = Counter()          # "429:<group>", "gave-up:<group>"
+_cooldown: dict[str, float] = {}
+
+
+def host_group(url: str) -> str:
+    host = httpx.URL(url).host
+    if "myworkday" in host:
+        m = _WD_SHARD.search(host + ".")
+        return f"workday:{m.group(1)}" if m else "workday"
+    if host.endswith("ycombinator.com"):
+        return "ycombinator"
+    return host
+
+
 async def _request(client: httpx.AsyncClient, method: str, url: str, **kw) -> httpx.Response | None:
-    for attempt in range(3):
+    group = host_group(url)
+    for attempt in range(5):
+        wait = _cooldown.get(group, 0) - time.monotonic()
+        if wait > 0:
+            await asyncio.sleep(wait)
         try:
             r = await client.request(method, url, **kw)
         except (httpx.TransportError, httpx.TimeoutException) as e:
             log.debug("transport error %s %s", url, e)
+            if attempt >= 2:
+                break
             await asyncio.sleep(1.5 * (attempt + 1))
             continue
-        if r.status_code in (429, 500, 502, 503, 504):
+        if r.status_code == 429:
+            HTTP_STATS["429:" + group] += 1
             retry_after = r.headers.get("retry-after", "")
-            wait = float(retry_after) if retry_after.isdigit() else 2.0 * (attempt + 1) + random.random()
-            await asyncio.sleep(min(wait, 20))
+            pause = float(retry_after) if retry_after.isdigit() else min(3.0 * 2 ** attempt, 30) + random.random()
+            _cooldown[group] = max(_cooldown.get(group, 0), time.monotonic() + min(pause, 60))
+            continue
+        if r.status_code in (500, 502, 503, 504):
+            if attempt >= 2:
+                break
+            await asyncio.sleep(2.0 * (attempt + 1) + random.random())
             continue
         return r
+    HTTP_STATS["gave-up:" + group] += 1
     return None
 
 
@@ -248,36 +282,59 @@ LISTERS = {
 }
 DETAILERS = {"greenhouse": greenhouse_detail, "workday": workday_detail}
 
-# Workday, iCIMS and Oracle Recruiting Cloud serve many companies from shared infrastructure
-# and answer bursts with HTTP 429, so they share a small "slow" lane: a few companies at a
-# time and a pause after every request.
+# Workday, iCIMS, Oracle Recruiting Cloud and Y Combinator serve many companies from shared hosts and answer
+# bursts with HTTP 429, so each shared host gets its own small lane (a few requests at a time, a pause after
+# each). Lanes for different hosts run side by side: Workday's ~12 server groups (wd1, wd5, ...) no longer
+# wait on each other or on Y Combinator.
 SLOW_ATS = {"workday", "icims", "oraclecloud", "ycjobs"}
-WORKDAY_CONCURRENCY = 4
+LANE_LIMITS = {"workday": 2, "icims": 2, "oraclecloud": 2, "ycjobs": 3}
 WORKDAY_DELAY = 0.4
 # (catch-up pages, hourly pages) for readers whose lists are paged newest-first
 MAX_PAGES = {"workday": (WORKDAY_MAX_PAGES, WORKDAY_MAX_PAGES), "icims": (5, 2)}
 DEFAULT_PAGES = (40, 40)
 
 
-def make_limits(concurrency: int = 32) -> dict[str, asyncio.Semaphore]:
-    return {"default": asyncio.Semaphore(concurrency), "slow": asyncio.Semaphore(WORKDAY_CONCURRENCY)}
+class Limits(dict):
+    """Semaphores by lane: "default" for most boards, one small lane per shared host for the slow ATSs."""
+
+    def __init__(self, concurrency: int):
+        super().__init__(default=asyncio.Semaphore(concurrency))
+
+    def __missing__(self, lane: str) -> asyncio.Semaphore:
+        sem = self[lane] = asyncio.Semaphore(LANE_LIMITS.get(lane.split(":")[0], 2))
+        return sem
 
 
-def _lane(ats: str) -> str:
-    return "slow" if ats in SLOW_ATS else "default"
+def make_limits(concurrency: int = 32) -> Limits:
+    return Limits(concurrency)
+
+
+def _lane(ats: str, token: str = "") -> str:
+    if ats not in SLOW_ATS:
+        return "default"
+    host = token.split("|")[0]
+    if ats == "workday":                      # "acme.wd5.myworkdayjobs.com|acme|Site" -> workday:wd5
+        m = _WD_SHARD.search(host)
+        return f"workday:{m.group(1) if m else host}"
+    if ats == "oraclecloud":
+        return f"oraclecloud:{host}"
+    return ats
 
 
 async def list_board(client, board: Board, limits: dict, window_days: int = WORKDAY_MAX_AGE_DAYS,
                      max_pages: int | None = None) -> list[Job]:
     from .bigtech import PAGED_LISTERS
-    async with limits[_lane(board.ats)]:
+    async with limits[_lane(board.ats, board.token)]:
         try:
             catch_up = window_days >= WORKDAY_MAX_AGE_DAYS
             pages = max_pages or MAX_PAGES.get(board.ats, DEFAULT_PAGES)[0 if catch_up else 1]
             if board.ats == "workday":
                 return await workday_list(client, board, window_days, pages)
             if board.ats in PAGED_LISTERS:
-                return await PAGED_LISTERS[board.ats](client, board, window_days, pages)
+                jobs = await PAGED_LISTERS[board.ats](client, board, window_days, pages)
+                if board.ats in SLOW_ATS:
+                    await asyncio.sleep(WORKDAY_DELAY)
+                return jobs
             return await LISTERS[board.ats](client, board)
         except Exception as e:  # one broken board must not stop the run
             log.debug("board %s:%s failed: %s", board.ats, board.token, e)
@@ -289,7 +346,7 @@ async def fetch_detail(client, job: Job, limits: dict) -> None:
     fn = DETAILERS.get(job.ats) or BIG_DETAILERS.get(job.ats)
     if not fn:
         return
-    async with limits[_lane(job.ats)]:
+    async with limits[_lane(job.ats, job.board)]:
         try:
             await fn(client, job)
         except Exception as e:

@@ -219,3 +219,12 @@ def test_sheet_row_shape():
     row = job_row(j)
     assert row["key"] == "greenhouse:acme:1" and row["group"] == "Other" and row["flags"] == "No sponsorship"
     assert row["posted"] == j.posted_at.strftime("%Y-%m-%d")
+
+
+def test_slow_lanes_by_shared_host():
+    from jobfinder.sources import _lane, host_group
+    assert _lane("workday", "acme.wd5.myworkdayjobs.com|acme|Ext") == "workday:wd5"
+    assert _lane("workday", "wd1.myworkdaysite.com|wf|Jobs") == "workday:wd1"
+    assert _lane("ycjobs", "fluxcap") == "ycjobs" and _lane("greenhouse", "acme") == "default"
+    assert host_group("https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/Ext/jobs") == "workday:wd5"
+    assert host_group("https://www.ycombinator.com/companies/x/jobs") == "ycombinator"
