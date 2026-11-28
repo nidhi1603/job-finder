@@ -92,6 +92,19 @@ Repo **Settings → Secrets and variables → Actions**:
 "Anyone" only means the job finder can reach the script without a Google login. Every request has to carry the
 secret, and the sheet itself stays private to your account.
 
+**On-time runs:** GitHub's own scheduler often starts runs late or skips them. An outside scheduler fixes that:
+a free [cron-job.org](https://cron-job.org) job that asks GitHub to start a run every 30 minutes.
+1. Create a fine-grained GitHub token: **Settings → Developer settings → Personal access tokens → Fine-grained
+   tokens → Generate new token**. Only select repositories: `job-finder`. Repository permissions: **Actions: Read and
+   write** (nothing else). It can only start runs in this repo.
+2. In cron-job.org, create a job:
+   - URL `https://api.github.com/repos/nidhi1603/job-finder/actions/workflows/poll.yml/dispatches`
+   - schedule: every 30 minutes
+   - request method `POST`, body `{"ref":"main"}`
+   - headers `Authorization: Bearer <token>`, `Accept: application/vnd.github+json`, `Content-Type: application/json`
+3. A test run should return HTTP 204 and a new run appears under **Actions → poll**. The workflow's own schedule
+   stays as a backup; runs never overlap.
+
 **First run:** go to **Actions → poll → Run workflow**. Until the email secrets exist, runs only log what they
 found and nothing is marked as sent.
 
