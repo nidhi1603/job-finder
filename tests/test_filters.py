@@ -182,8 +182,8 @@ def test_fit_needs_enough_skills_and_ignores_vague_words():
     assert three.skills_total == 3 and fit_band(three) == 1   # security/monitoring don't count either way
 
 
-def test_merge_cities_and_alerts():
-    from jobfinder.run import is_alert, merge_cities
+def test_merge_cities_and_picks():
+    from jobfinder.run import is_pick, merge_cities
     text = "Build recommendation models with PyTorch for e-commerce search and ranking at scale."
     a = job("Machine Learning Engineer", "San Jose, CA", text)
     b = job("Machine Learning Engineer", "Seattle, WA", text)
@@ -195,21 +195,22 @@ def test_merge_cities_and_alerts():
     strong = job(text="Requirements:\n- Python\n- SQL\n- PyTorch\n- AWS")
     from jobfinder.scoring import score_fit
     score_fit(strong, {"Python", "SQL", "PyTorch", "AWS"})
-    assert is_alert(strong)
+    assert is_pick(strong)
 
 
-def test_emails_render():
-    from jobfinder.emailer import render, render_summary
-    j = job(text="Requirements:\n- Python\n- SQL\n- PyTorch\n- AWS")
+def test_daily_email():
+    from jobfinder.emailer import render_daily
     from jobfinder.scoring import score_fit
+    j = job(text="Requirements:\n- Python\n- SQL\n- PyTorch\n- AWS")
     score_fit(j, {"Python", "SQL", "PyTorch", "AWS"})
-    subject, html_body, _ = render([j], NOW, 0, False, kind="alert", sheet_url="https://docs.google.com/x", others=5)
-    assert subject.startswith("1 strong match · top: Software Engineer @ Acme") and "Open your tracker" in html_body
-    rows = [{"status": "New", "fit": 80, "group": "Strong", "company": "Acme", "title": "MLE", "url": "https://x"},
-            {"status": "Applied", "fit": 60, "group": "Good", "company": "Beta", "title": "SWE", "url": "https://y"}]
-    subject, html_body, text_body = render_summary({"rows": rows, "applied_week": 3, "applied_total": 9, "url": "u"}, NOW)
-    assert subject == "Morning summary: 2 new jobs, 1 strong · 3 applied this week"
-    assert "MLE" in text_body and "SWE" not in text_body      # only rows still marked New are listed
+    other = job("Data Scientist", text="Requirements:\n- R")
+    score_fit(other, {"Python"})
+    info = {"applied_week": 3, "applied_total": 9}
+    subject, html_body, text_body = render_daily([j, other], [j], info, "https://docs.google.com/x", NOW)
+    assert subject == "Today's jobs: 2 new matches, 1 strong · top: Software Engineer @ Acme"
+    assert "Open your tracker" in html_body and "The other 1 job is in your tracker" in text_body
+    subject, _, text_body = render_daily([], [], info, "", NOW)
+    assert subject == "Today's jobs: nothing new · 3 applied this week" and "No new matches" in text_body
 
 
 def test_sheet_row_shape():

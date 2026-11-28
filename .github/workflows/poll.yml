@@ -2,8 +2,9 @@ name: poll
 
 on:
   schedule:
-    - cron: "17 * * * *"        # twice an hour, off the top of the hour: GitHub's scheduler often starts runs late
-    - cron: "47 * * * *"        # or skips them, so a second slot keeps the gap between checks short
+    - cron: "17 8 * * *"        # once a day, overnight: ~3:17am Eastern (4:17am in summer)
+    - cron: "17 9 * * *"        # backups, because GitHub's scheduler sometimes skips runs; they do nothing
+    - cron: "17 10 * * *"       # if that day's run already happened
   workflow_dispatch:
     inputs:
       all:
@@ -25,7 +26,7 @@ concurrency:
 jobs:
   poll:
     runs-on: ubuntu-latest
-    timeout-minutes: 150     # a catch-up or backfill reads 15 days of every board; normal runs take minutes
+    timeout-minutes: 150     # a daily run reads every board; a catch-up or backfill reads 15 days back
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,8 +37,8 @@ jobs:
       - name: Load seen-jobs state (kept on the 'state' branch so main's history stays small)
         run: |
           git fetch -q origin state 2>/dev/null && git show FETCH_HEAD:data/seen.json > data/seen.json || echo "no state yet: catch-up run"
-      - name: Find, filter and email new jobs
-        run: python -m jobfinder.run ${{ inputs.all && '--all' || '' }} ${{ inputs.backfill && '--backfill' || '' }}
+      - name: Find and filter new jobs, add them to the tracker, send the daily email
+        run: python -m jobfinder.run ${{ github.event_name == 'schedule' && '--skip-if-ran-today' || '' }} ${{ inputs.all && '--all' || '' }} ${{ inputs.backfill && '--backfill' || '' }}
         env:
           PROFILE_SKILLS: ${{ secrets.PROFILE_SKILLS }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
@@ -46,8 +47,7 @@ jobs:
           SHEET_URL: ${{ secrets.SHEET_URL }}
           SHEET_SECRET: ${{ secrets.SHEET_SECRET }}
           MIN_FIT: ${{ vars.MIN_FIT }}
-          SUMMARY_HOUR: ${{ vars.SUMMARY_HOUR }}
-          SUMMARY_TZ: ${{ vars.SUMMARY_TZ }}
+          LOCAL_TZ: ${{ vars.LOCAL_TZ }}
       - name: Save seen-jobs state
         run: |
           [ -f data/seen.json ] || exit 0

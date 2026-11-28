@@ -1,11 +1,11 @@
 # job-finder
 
-A personal job finder for new-grad AI/ML, software, data and research roles in the US. Every hour it reads
+A personal job finder for new-grad AI/ML, software, data and research roles in the US. Every night it reads
 companies' own job boards (Greenhouse, Lever, Ashby, Workable, Workday, iCIMS, Oracle Recruiting Cloud), the career
 sites of Amazon, Apple, Microsoft, Google, TikTok and IBM, and the job pages of recently funded startups. It keeps only fresh entry-level jobs
 you can actually take, scores how well each one matches your resume, and adds the new ones to a private Google
-Sheet that doubles as your application tracker, with an email for strong matches and one each morning. The point is
-to catch jobs within hours of posting, before they reach LinkedIn and fill up with applicants.
+Sheet that doubles as your application tracker, and sends one email each morning. The point is to catch jobs
+within a day of posting, before they reach LinkedIn and fill up with applicants.
 
 ## How it works
 
@@ -21,11 +21,12 @@ to catch jobs within hours of posting, before they reach LinkedIn and fill up wi
    (or its Y Combinator jobs page), with exact-name guesses on Greenhouse/Lever/Ashby/Workable as a fallback.
    SEC asks automated clients for a contact email; the workflow passes the `EMAIL_FROM` secret.
 3. **Big companies** (`jobfinder/bigtech.py`): Amazon, Apple, Microsoft, Google (early-career roles), TikTok, IBM,
-   Oracle and JPMorgan Chase are read directly every hour. Meta is not included because metacareers.com blocks
+   Oracle and JPMorgan Chase are read directly every run. Meta is not included because metacareers.com blocks
    automated access.
-4. **Runs** (`poll.yml`, at :17 and :47 past each hour because GitHub's scheduler often starts runs late or
-   skips them): funded startups, big companies and new-grad-list companies are checked every run; broad-sweep
-   boards every 4th half-hour slot. Workday gets its own slow lane because it rate-limits bursts.
+4. **Daily run** (`poll.yml`), overnight at about 3am Eastern, with backup start times at 4am and 5am because
+   GitHub's scheduler sometimes skips runs (a backup does nothing if that day's run already happened). Every board
+   is read every run. Workday, Oracle and Y Combinator get small per-host lanes because they rate-limit bursts; a
+   429 answer pauses that host and is retried, and each run's log counts them.
 5. **Rules** (`jobfinder/rules.py`, one editable file). A job has to pass all of these:
    - US location (remote, hybrid or onsite)
    - A target title family
@@ -52,12 +53,10 @@ to catch jobs within hours of posting, before they reach LinkedIn and fill up wi
    Status (New, Applied, Interviewing, Offer, Rejected, Skipped); "Applied on" fills itself in, and a Companies tab
    lists every company you applied to. A job posted in several cities is one row. New jobs at a company you already
    applied to say so.
-8. **Email**:
-   - **Alert**, right away: strong fits (70%+ with 4+ skills), and good fits (50%+ with 3+ skills) at recently funded
-     startups or aimed at new grads.
-   - **Morning summary**, once a day at the first run after 8am Eastern (`SUMMARY_HOUR`, `SUMMARY_TZ`): what
-     arrived, the best ones still marked New, and how many you applied to this week.
-   - Without the sheet set up (or if it can't be reached), each run emails every new match instead, so nothing is lost.
+8. **Email**, one each morning: how many new jobs arrived (funded / strong / good / other), how many you applied
+   to this week, and in full the strong fits (70%+ with 4+ skills) plus good fits (50%+ with 3+ skills) at recently
+   funded startups or aimed at new grads. Everything else is in the sheet. Without the sheet set up (or if it can't
+   be reached), the email lists every new match instead, so nothing is lost.
 9. **No repeats**: `data/seen.json` (job keys and dates only) lives on the `state` branch.
 
 ## Setup (once)
@@ -73,7 +72,7 @@ Repo **Settings → Secrets and variables → Actions**:
 | `SHEET_URL` | secret | the tracker's web app link (below) |
 | `SHEET_SECRET` | secret | a random string; the same value goes in `SECRET` in the script |
 | `MIN_FIT` | variable | minimum fit % to keep (unset = 0) |
-| `SUMMARY_HOUR`, `SUMMARY_TZ` | variables | morning summary time (default 8, `America/New_York`) |
+| `LOCAL_TZ` | variable | your time zone for "today" (default `America/New_York`) |
 
 **Gmail app password:** turn on 2-Step Verification for the sending Google account. Then go to
 <https://myaccount.google.com/apppasswords>, create one named "job-finder", and paste the 16 characters into
@@ -91,19 +90,6 @@ Repo **Settings → Secrets and variables → Actions**:
 
 "Anyone" only means the job finder can reach the script without a Google login. Every request has to carry the
 secret, and the sheet itself stays private to your account.
-
-**On-time runs:** GitHub's own scheduler often starts runs late or skips them. An outside scheduler fixes that:
-a free [cron-job.org](https://cron-job.org) job that asks GitHub to start a run every 30 minutes.
-1. Create a fine-grained GitHub token: **Settings → Developer settings → Personal access tokens → Fine-grained
-   tokens → Generate new token**. Only select repositories: `job-finder`. Repository permissions: **Actions: Read and
-   write** (nothing else). It can only start runs in this repo.
-2. In cron-job.org, create a job:
-   - URL `https://api.github.com/repos/nidhi1603/job-finder/actions/workflows/poll.yml/dispatches`
-   - schedule: every 30 minutes
-   - request method `POST`, body `{"ref":"main"}`
-   - headers `Authorization: Bearer <token>`, `Accept: application/vnd.github+json`, `Content-Type: application/json`
-3. A test run should return HTTP 204 and a new run appears under **Actions → poll**. The workflow's own schedule
-   stays as a backup; runs never overlap.
 
 **First run:** go to **Actions → poll → Run workflow**. Until the email secrets exist, runs only log what they
 found and nothing is marked as sent.

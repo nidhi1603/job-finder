@@ -1,18 +1,19 @@
-"""Hourly run: read job feeds, apply rules, score, add new matches to your tracker sheet, email alerts, save state.
+"""Daily run (overnight): read every job board, apply rules, score, add new matches to your tracker sheet, send
+one morning email, save state.
 
-    python -m jobfinder.run              # normal hourly run
-    python -m jobfinder.run --all        # check every board this run
-    python -m jobfinder.run --backfill   # load the last 15 days into the tracker sheet, no email
-    python -m jobfinder.run --dry-run    # don't email, write the sheet or save state; write out/digest-*.html
+    python -m jobfinder.run                      # the daily run
+    python -m jobfinder.run --skip-if-ran-today  # what the backup schedules use: do nothing if today's run happened
+    python -m jobfinder.run --all                # read 15 days back instead of since the last run
+    python -m jobfinder.run --backfill           # load the last 15 days into the tracker sheet, no email
+    python -m jobfinder.run --dry-run            # no email, no sheet, no state save; writes out/digest-*.html
 
-With the tracker sheet set up (SHEET_URL + SHEET_SECRET), every new match goes to the sheet, an email goes out only
-for strong matches, and one summary email arrives each morning. Without it, all matches are emailed as before.
+With the tracker sheet set up (SHEET_URL + SHEET_SECRET), new matches go to the sheet and the email lists the strong
+ones in full. Without it (or if the sheet can't be reached), the email lists every new match.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -39,16 +40,14 @@ from .urls import match_id, parse_ats_url
 ROOT = Path(__file__).resolve().parent.parent
 BOARDS = ROOT / "data" / "boards.json"
 SIMPLIFY_URL = "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json"
-BROAD_BUCKETS = 4          # each broad-sweep board is checked in every 4th half-hour slot
 MAX_EMAIL_JOBS = 150       # full-digest mode (no tracker sheet)
-MAX_ALERT_JOBS = 40
+MAX_PICKS = 40             # jobs shown in full in the daily email when the sheet holds the rest
 
 
 def load_boards() -> list[Board]:
     return [Board(**b) for b in json.loads(BOARDS.read_text())]
 
 
-EVERY_RUN = {"newgrad", "bigtech", "funded"}   # the broad sweep is split across 4 slots
 _TIER_RANK = {"funded": 0, "bigtech": 1, "newgrad": 2, "broad": 3}
 
 
@@ -60,10 +59,6 @@ def merge_boards(boards: list[Board]) -> list[Board]:
         if k not in best or _TIER_RANK.get(b.tier, 9) < _TIER_RANK.get(best[k].tier, 9):
             best[k] = Board(b.ats, b.token, b.name or (best[k].name if k in best else ""), b.tier)
     return list(best.values())
-
-
-def bucket(board: Board) -> int:
-    return int(hashlib.md5(f"{board.ats}:{board.token}".encode()).hexdigest(), 16) % BROAD_BUCKETS
 
 
 async def simplify_match_ids(client: httpx.AsyncClient) -> set[str]:
@@ -110,32 +105,25 @@ def merge_cities(jobs: list[Job]) -> list[Job]:
     return out
 
 
-def is_alert(job: Job) -> bool:
-    """Worth an email right away: a strong fit, or a good fit at a recently funded startup or aimed at new grads."""
+def is_pick(job: Job) -> bool:
+    """Shown in full in the daily email: a strong fit, or a good fit at a recently funded startup or aimed at new grads."""
     band = fit_band(job)
     return band == 0 or (band == 1 and bool(job.funding or job.boosts))
 
 
-def maybe_send_summary(state: State, now, args) -> None:
-    """Once a day, at the first run after SUMMARY_HOUR (default 8am, America/New_York)."""
-    tz = ZoneInfo(os.environ.get("SUMMARY_TZ") or "America/New_York")
-    local = now.astimezone(tz)
-    today = local.strftime("%Y-%m-%d")
-    if "last_summary" not in state.meta:          # first run with the tracker: start counting now, first summary tomorrow
-        state.meta["last_summary"] = today
-        state.meta["last_summary_at"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-        return
-    if local.hour < int(os.environ.get("SUMMARY_HOUR") or 8) or state.meta.get("last_summary") == today:
-        return
-    since = state.meta.get("last_summary_at") or (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    data = sheet.summary(since)
-    if data is None:
-        return
-    subject, html_body, text_body = emailer.render_summary(data, now)
-    if emailer.send(subject, html_body, text_body, now):
-        print("emailed: " + subject)
-        state.meta["last_summary"] = today
-        state.meta["last_summary_at"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+def local_today(now) -> str:
+    return now.astimezone(ZoneInfo(os.environ.get("LOCAL_TZ") or "America/New_York")).strftime("%Y-%m-%d")
+
+
+def send_daily_email(unique: list[Job], sheet_url: str, state: State, now) -> bool:
+    """One email per run: counts, the picks in full, and application stats from the sheet."""
+    since = state.meta.get("last_daily_at") or (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    info = sheet.summary(since) or {}
+    picks = [j for j in unique if is_pick(j)][:MAX_PICKS] or unique[:10]
+    subject, html_body, text_body = emailer.render_daily(unique, picks, info, sheet_url or info.get("url", ""), now)
+    sent = emailer.send(subject, html_body, text_body, now)
+    print(("emailed: " if sent else "not emailed: ") + subject)
+    return sent
 
 
 async def run(args) -> None:
@@ -149,14 +137,13 @@ async def run(args) -> None:
     funded, funding_labels = funded_boards()
     boards = merge_boards(funded + BIGTECH_BOARDS + load_boards())
     state = State.load()
+    today = local_today(now)
+    if args.skip_if_ran_today and state.meta.get("last_daily") == today:
+        print(f"Today's run ({today}) already happened; this backup run does nothing.")
+        return
     catch_up = state.is_empty()
     full = args.all or catch_up or args.backfill
-    if full:
-        selected = boards
-    else:
-        slot = (now.hour * 2 + now.minute // 30) % BROAD_BUCKETS     # runs at :17 and :47 cover different slots
-        # Y Combinator company pages (~570, one request each) rotate like the broad sweep: each every ~2 hours
-        selected = [b for b in boards if (b.tier in EVERY_RUN and b.ats != "ycjobs") or bucket(b) == slot]
+    selected = boards                       # once a day, so every board is read every run
     if args.limit:
         selected = selected[: args.limit]
     last_run = parse_iso(state.meta.get("last_run"))
@@ -233,15 +220,8 @@ async def run(args) -> None:
             for j in unique:
                 if res["annotations"].get(j.key):
                     j.flags.insert(0, res["annotations"][j.key])
-            alerts = [j for j in unique if is_alert(j)][:MAX_ALERT_JOBS]
-            if alerts and not (catch_up or args.backfill):
-                subject, html_body, text_body = emailer.render(
-                    alerts, now, 0, False, kind="alert", sheet_url=res.get("url", ""), others=len(unique) - len(alerts))
-                print(("emailed: " if emailer.send(subject, html_body, text_body, now) else "not emailed: ") + subject)
-            if args.backfill:
-                state.meta.setdefault("last_summary_at", now.strftime("%Y-%m-%dT%H:%M:%SZ"))
-            else:
-                maybe_send_summary(state, now, args)
+            if not args.backfill:
+                send_daily_email(unique, res.get("url", ""), state, now)
         else:
             print("tracker sheet failed, so this run emails the full list instead (nothing is lost)")
 
@@ -251,6 +231,9 @@ async def run(args) -> None:
         delivered = emailer.send(subject, html_body, text_body, now)
         print(("emailed: " if delivered else "not emailed: ") + subject)
 
+    if not args.dry_run and (delivered or not unique):
+        state.meta["last_daily"] = today
+        state.meta["last_daily_at"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     if delivered:
         for job in passed:
             state.mark(job, "s" if use_sheet else "e", now)
@@ -259,7 +242,7 @@ async def run(args) -> None:
     else:
         print("state not saved (dry run, or neither email nor the tracker sheet is set up)")
 
-    print(f"boards checked: {len(selected)} ({'all' if full else 'hourly slice'}) in {time.time() - t0:.0f}s")
+    print(f"boards checked: {len(selected)} (reading {window_days} days back) in {time.time() - t0:.0f}s")
     if HTTP_STATS:
         print("rate limiting (429 answers / boards given up on), by host group:")
         for k, v in sorted(HTTP_STATS.items(), key=lambda kv: -kv[1])[:15]:
@@ -270,7 +253,8 @@ async def run(args) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--all", action="store_true", help="check every board this run")
+    p.add_argument("--all", action="store_true", help="read 15 days back instead of since the last run")
+    p.add_argument("--skip-if-ran-today", action="store_true", help="do nothing if today's run already happened")
     p.add_argument("--backfill", action="store_true", help="load the last 15 days into the tracker sheet, no email")
     p.add_argument("--dry-run", action="store_true", help="no email, no sheet, no state save")
     p.add_argument("--limit", type=int, default=0, help="only the first N boards (testing)")
